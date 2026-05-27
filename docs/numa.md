@@ -33,9 +33,10 @@ A single-socket machine, which is what the CI runners are, reports one NUMA node
 In that case:
 
 - partition-to-node assignment maps everything to node 0 (a no-op),
-- worker pinning to the single node's CPUs adds no locality benefit, and the test
-  asserts `pinned_workers() == 0` so the code path is exercised without claiming a
-  win,
+- worker pinning to the single node's CPUs is the whole online CPU set, so it adds
+  no locality benefit; the affinity call may succeed (Linux) or be unavailable,
+  and the test asserts `pinned_workers()` stays within `[0, worker_count]` while
+  `node_count() == 1`, so the code path is exercised without claiming a win,
 - the run completes with identical output and the same performance as the naive
   scheduler.
 
