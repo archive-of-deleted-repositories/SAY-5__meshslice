@@ -1,0 +1,119 @@
+name: ci
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+    branches: [main]
+
+jobs:
+  format:
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+      - name: Install pinned clang-format
+        run: pip install "clang-format==18.1.8"
+      - name: Check formatting
+        run: |
+          files=$(find src tests bench -name '*.cpp' -o -name '*.h')
+          clang-format --dry-run --Werror $files
+
+  build-gcc:
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@v4
+      - name: Configure and build
+        env:
+          CC: gcc
+          CXX: g++
+        run: |
+          cmake -S . -B build -DCMAKE_BUILD_TYPE=Release
+          cmake --build build -j "$(nproc)"
+      - name: Test
+        run: ctest --test-dir build --output-on-failure
+
+  build-clang:
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@v4
+      - name: Configure and build
+        env:
+          CC: clang
+          CXX: clang++
+        run: |
+          cmake -S . -B build -DCMAKE_BUILD_TYPE=Release
+          cmake --build build -j "$(nproc)"
+      - name: Test
+        run: ctest --test-dir build --output-on-failure
+
+  asan-ubsan:
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@v4
+      - name: Build with ASan + UBSan
+        env:
+          CC: clang
+          CXX: clang++
+        run: |
+          cmake -S . -B build-asan -DCMAKE_BUILD_TYPE=Debug -DMESHSLICE_ENABLE_ASAN=ON
+          cmake --build build-asan -j "$(nproc)"
+      - name: Test
+        run: ctest --test-dir build-asan --output-on-failure
+
+  tsan-stress:
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@v4
+      - name: Build with TSan
+        env:
+          CC: clang
+          CXX: clang++
+        run: |
+          cmake -S . -B build-tsan -DCMAKE_BUILD_TYPE=Debug -DMESHSLICE_ENABLE_TSAN=ON
+          cmake --build build-tsan -j "$(nproc)"
+      - name: Concurrency tests under TSan
+        run: ctest --test-dir build-tsan --output-on-failure -R "ThreadPool|Determinism|MemoryBudget"
+
+  fuzz-smoke:
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@v4
+      - name: Build fuzzer
+        env:
+          CC: clang
+          CXX: clang++
+        run: |
+          cmake -S . -B build-fuzz -DCMAKE_BUILD_TYPE=Debug -DMESHSLICE_BUILD_FUZZ=ON -DMESHSLICE_BUILD_TESTS=OFF
+          cmake --build build-fuzz -j "$(nproc)" --target fuzz_stl
+      - name: Run libFuzzer (5k iters)
+        run: ./build-fuzz/fuzz_stl -runs=5000 -max_total_time=60
+
+  bench-smoke:
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@v4
+      - name: Build bench
+        run: |
+          cmake -S . -B build -DCMAKE_BUILD_TYPE=Release -DMESHSLICE_BUILD_TESTS=OFF
+          cmake --build build -j "$(nproc)" --target scaling_bench
+      - name: Smoke run
+        run: ./build/scaling_bench --triangles 50000
+
+  docker:
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@v4
+      - name: Set up QEMU
+        uses: docker/setup-qemu-action@v3
+      - name: Set up Buildx
+        uses: docker/setup-buildx-action@v3
+      - name: Build multi-arch image
+        uses: docker/build-push-action@v6
+        with:
+          context: .
+          platforms: linux/amd64,linux/arm64
+          push: false
+          tags: meshslice:ci
