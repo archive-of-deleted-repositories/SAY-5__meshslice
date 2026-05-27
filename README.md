@@ -33,6 +33,12 @@ hot path. Three properties carry the project:
   thread counts {1, 2, 4, 8}. See `docs/determinism.md`.
 - **Near-linear scaling.** The bench reports throughput and scaling efficiency at
   1..N cores. See `docs/scaling.md`.
+- **NUMA-aware scheduling.** Optional worker pinning and partition-to-node
+  assignment, degrading cleanly to the naive scheduler on a single-node box. See
+  `docs/numa.md`.
+- **Out-of-core streaming.** A streaming loader partitions on the fly and never
+  holds the whole mesh, so peak memory is bounded regardless of input size. See
+  `docs/out-of-core.md`.
 
 ## Build and run
 
@@ -48,6 +54,8 @@ make format-check   # clang-format dry run
 ./build/meshslice bbox_stats examples/cube.stl
 ./build/meshslice voxel_count examples/sphere.stl --threads 4 --voxel-res 64
 ./build/meshslice decimate examples/bunny_lowpoly.stl --ratio 0.5
+./build/meshslice bbox_stats examples/sphere.stl --numa     # NUMA-aware
+./build/meshslice voxel_count big.stl --stream              # out-of-core
 ```
 
 ## Layout

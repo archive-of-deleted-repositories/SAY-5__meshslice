@@ -1,3 +1,4 @@
+#include <cstdio>
 #include <cstdlib>
 #include <cstring>
 #include <iostream>
@@ -6,6 +7,7 @@
 #include "mesh/obj_loader.h"
 #include "mesh/stl_loader.h"
 #include "pipeline.h"
+#include "pipeline_stream.h"
 
 namespace {
 
@@ -20,7 +22,9 @@ void print_usage() {
               << "    --divisions N      grid cells per axis (default: 8)\n"
               << "    --voxel-res N      voxel resolution (default: 64)\n"
               << "    --ratio R          decimate target ratio (default: 0.5)\n"
-              << "    --numa             pin workers to NUMA nodes (default: off)\n";
+              << "    --numa             pin workers to NUMA nodes (default: off)\n"
+              << "    --stream           out-of-core streaming mode, STL only\n"
+              << "                       (bbox_stats and voxel_count)\n";
 }
 
 Mesh load_any(const std::string& path) {
@@ -46,6 +50,7 @@ int main(int argc, char** argv) {
         return 2;
     }
     const std::string path = argv[2];
+    bool stream = false;
 
     for (int i = 3; i < argc; ++i) {
         const std::string a = argv[i];
@@ -62,6 +67,8 @@ int main(int argc, char** argv) {
             cfg.decimate_ratio = std::strtof(next().c_str(), nullptr);
         } else if (a == "--numa") {
             cfg.numa_aware = true;
+        } else if (a == "--stream") {
+            stream = true;
         } else {
             std::cerr << "unknown option: " << a << "\n";
             return 2;
@@ -69,6 +76,27 @@ int main(int argc, char** argv) {
     }
 
     try {
+        if (stream) {
+            // Out-of-core: never materialize the whole mesh. STL only.
+            StreamConfig sc;
+            sc.op = cfg.op;
+            sc.divisions = cfg.divisions;
+            sc.voxel_resolution = cfg.voxel_resolution;
+            const StreamResult r = run_streaming(stl_file_source(path), sc);
+            std::cout << "op=" << op_name(r.op) << "\n";
+            std::cout << "streamed_triangles=" << r.triangles << "\n";
+            std::cout << "occupied_cells=" << r.occupied_cells << "\n";
+            if (r.op == Op::VoxelCount) {
+                std::cout << "occupied_voxels=" << r.voxel_count << "\n";
+            } else {
+                std::cout << "triangles=" << r.bbox.triangles << "\n";
+            }
+            char buf[32];
+            std::snprintf(buf, sizeof(buf), "%016llx",
+                          static_cast<unsigned long long>(r.output_hash));
+            std::cout << "output_hash=" << buf << "\n";
+            return 0;
+        }
         const Mesh mesh = load_any(path);
         const PipelineResult r = run_pipeline(mesh, cfg);
         std::cout << format_result(r);

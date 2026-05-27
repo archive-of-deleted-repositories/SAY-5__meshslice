@@ -33,6 +33,7 @@ add_library(meshslice_core
   src/mesh/mesh.cpp
   src/mesh/stl_loader.cpp
   src/mesh/obj_loader.cpp
+  src/mesh/stl_stream.cpp
   src/mesh/generators.cpp
   src/partition/grid.cpp
   src/pool/thread_pool.cpp
@@ -43,6 +44,7 @@ add_library(meshslice_core
   src/ops/voxel_count.cpp
   src/merge/merger.cpp
   src/pipeline.cpp
+  src/pipeline_stream.cpp
 )
 target_include_directories(meshslice_core PUBLIC ${CMAKE_CURRENT_SOURCE_DIR}/src)
 target_link_libraries(meshslice_core PUBLIC Threads::Threads)
@@ -72,6 +74,7 @@ if(MESHSLICE_BUILD_TESTS)
     tests/unit/test_property.cpp
     tests/unit/test_determinism.cpp
     tests/unit/test_numa.cpp
+    tests/unit/test_streaming.cpp
     tests/e2e/test_pipeline.cpp
   )
   target_link_libraries(meshslice_tests PRIVATE meshslice_core GTest::gtest_main)
