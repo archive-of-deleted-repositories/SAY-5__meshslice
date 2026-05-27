@@ -1,0 +1,21 @@
+{
+  "triangles": 199712,
+  "samples": [
+    {"op": "decimate", "threads": 1, "seconds": 0.19165, "tris_per_sec": 1.04206e+06, "efficiency": 1},
+    {"op": "decimate", "threads": 2, "seconds": 0.107929, "tris_per_sec": 1.85041e+06, "efficiency": 0.887856},
+    {"op": "decimate", "threads": 4, "seconds": 0.066296, "tris_per_sec": 3.01243e+06, "efficiency": 0.722707},
+    {"op": "decimate", "threads": 8, "seconds": 0.048543, "tris_per_sec": 4.11413e+06, "efficiency": 0.493506},
+    {"op": "normals", "threads": 1, "seconds": 0.171244, "tris_per_sec": 1.16624e+06, "efficiency": 1},
+    {"op": "normals", "threads": 2, "seconds": 0.165153, "tris_per_sec": 1.20925e+06, "efficiency": 0.51844},
+    {"op": "normals", "threads": 4, "seconds": 0.16415, "tris_per_sec": 1.21665e+06, "efficiency": 0.260805},
+    {"op": "normals", "threads": 8, "seconds": 0.167764, "tris_per_sec": 1.19043e+06, "efficiency": 0.127593},
+    {"op": "bbox_stats", "threads": 1, "seconds": 0.0235429, "tris_per_sec": 8.48289e+06, "efficiency": 1},
+    {"op": "bbox_stats", "threads": 2, "seconds": 0.0222015, "tris_per_sec": 8.99543e+06, "efficiency": 0.53021},
+    {"op": "bbox_stats", "threads": 4, "seconds": 0.0230557, "tris_per_sec": 8.66213e+06, "efficiency": 0.255282},
+    {"op": "bbox_stats", "threads": 8, "seconds": 0.0243135, "tris_per_sec": 8.21404e+06, "efficiency": 0.121038},
+    {"op": "voxel_count", "threads": 1, "seconds": 0.054552, "tris_per_sec": 3.66095e+06, "efficiency": 1},
+    {"op": "voxel_count", "threads": 2, "seconds": 0.0490403, "tris_per_sec": 4.0724e+06, "efficiency": 0.556195},
+    {"op": "voxel_count", "threads": 4, "seconds": 0.0459385, "tris_per_sec": 4.34737e+06, "efficiency": 0.296875},
+    {"op": "voxel_count", "threads": 8, "seconds": 0.0458167, "tris_per_sec": 4.35893e+06, "efficiency": 0.148832}
+  ]
+}
