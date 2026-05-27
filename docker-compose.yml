@@ -1,0 +1,9 @@
+services:
+  meshslice:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    image: meshslice:latest
+    volumes:
+      - ./examples:/data:ro
+    command: ["bbox_stats", "/data/cube.stl"]
