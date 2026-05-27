@@ -102,6 +102,39 @@ jobs:
       - name: Smoke run
         run: ./build/scaling_bench --triangles 50000
 
+  coverage:
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@v4
+      - name: Install lcov
+        run: sudo apt-get update && sudo apt-get install -y lcov
+      - name: Build with coverage
+        env:
+          CC: gcc
+          CXX: g++
+          CXXFLAGS: "--coverage -O0 -g"
+        run: |
+          cmake -S . -B build-cov -DCMAKE_BUILD_TYPE=Debug
+          cmake --build build-cov -j "$(nproc)"
+      - name: Run tests
+        run: ctest --test-dir build-cov --output-on-failure
+      - name: Compute coverage
+        run: |
+          lcov --capture --directory build-cov --output-file cov.info \
+            --ignore-errors mismatch,negative,gcov,source 2>/dev/null || \
+          lcov --capture --directory build-cov --output-file cov.info
+          lcov --extract cov.info "$(pwd)/src/*" --output-file cov.src.info \
+            --ignore-errors unused 2>/dev/null
+          lcov --list cov.src.info
+      - name: Enforce coverage floor
+        run: |
+          pct=$(lcov --summary cov.src.info 2>&1 | awk '/lines/ {gsub("%","",$2); print $2}')
+          echo "src line coverage: ${pct}%"
+          floor=80.0
+          awk -v p="$pct" -v f="$floor" 'BEGIN { exit (p+0 >= f+0) ? 0 : 1 }' || {
+            echo "coverage ${pct}% is below floor ${floor}%"; exit 1;
+          }
+
   docker:
     runs-on: ubuntu-24.04
     steps:

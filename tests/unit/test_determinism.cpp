@@ -55,3 +55,25 @@ TEST(Determinism, RepeatedRunsStable) {
     const uint64_t b = run_hash(m, Op::Decimate, 4, 4);
     EXPECT_EQ(a, b);
 }
+
+// Wider corpus: several meshes of different shape and size, every operator,
+// every thread count. Each row must be bit-identical to its single-thread run.
+TEST(Determinism, CorpusBitIdenticalAcrossThreadCounts) {
+    std::vector<Mesh> corpus;
+    corpus.push_back(make_cube(1.0f));
+    corpus.push_back(make_sphere(20, 28));
+    corpus.push_back(make_blob(4, 2024));
+    corpus.push_back(make_grid_mesh(40000, 7));
+
+    const Op ops[] = {Op::BboxStats, Op::VoxelCount, Op::Normals, Op::Decimate};
+    const size_t thread_counts[] = {1, 2, 4, 8};
+    for (const Mesh& m : corpus) {
+        for (Op op : ops) {
+            const uint64_t baseline = run_hash(m, op, 1, 1);
+            for (size_t tc : thread_counts) {
+                EXPECT_EQ(run_hash(m, op, tc, tc), baseline)
+                    << "op=" << op_name(op) << " threads=" << tc << " tris=" << m.triangle_count();
+            }
+        }
+    }
+}
