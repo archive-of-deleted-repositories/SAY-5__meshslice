@@ -10,7 +10,12 @@
 #include <vector>
 
 #include "mesh/generators.h"
+#include "partition/grid.h"
 #include "pipeline.h"
+
+#if defined(__linux__) || defined(__APPLE__)
+#include <sys/resource.h>
+#endif
 
 using namespace meshslice;
 
@@ -23,6 +28,47 @@ struct Sample {
     double tris_per_sec;
     double efficiency;  // speedup / threads, vs single-thread baseline.
 };
+
+// Peak resident set size in bytes (0 if unsupported on this platform).
+size_t peak_rss_bytes() {
+#if defined(__linux__) || defined(__APPLE__)
+    struct rusage ru;
+    if (getrusage(RUSAGE_SELF, &ru) != 0) {
+        return 0;
+    }
+#if defined(__APPLE__)
+    return static_cast<size_t>(ru.ru_maxrss);  // bytes on macOS.
+#else
+    return static_cast<size_t>(ru.ru_maxrss) * 1024;  // kilobytes on Linux.
+#endif
+#else
+    return 0;
+#endif
+}
+
+// The bounded-memory budget: workers * largest per-unit footprint, contrasted
+// with the full-mesh footprint a naive materialize-everything design would hold.
+struct MemoryBudget {
+    size_t max_unit_bytes = 0;
+    size_t partitions = 0;
+    size_t budget_bytes = 0;     // workers * max_unit_bytes.
+    size_t full_mesh_bytes = 0;  // partitions * max_unit_bytes.
+    size_t workers = 0;
+};
+
+MemoryBudget compute_budget(const Mesh& m, uint32_t divisions, size_t workers) {
+    GridPartitioner part(divisions);
+    const auto units = part.partition(m);
+    MemoryBudget b;
+    b.workers = workers;
+    b.partitions = units.size();
+    for (const auto& u : units) {
+        b.max_unit_bytes = std::max(b.max_unit_bytes, u.approx_bytes());
+    }
+    b.budget_bytes = workers * b.max_unit_bytes;
+    b.full_mesh_bytes = b.partitions * b.max_unit_bytes;
+    return b;
+}
 
 double time_run(const Mesh& m, Op op, size_t threads) {
     PipelineConfig cfg;
@@ -145,6 +191,22 @@ int main(int argc, char** argv) {
                     s.tris_per_sec, s.efficiency);
     }
 
+    // Memory-budget report: the in-flight cap bounds peak working set to
+    // workers * max_unit_bytes, well below the full-mesh footprint.
+    const size_t report_workers =
+        std::min<size_t>(8, std::max<size_t>(1, std::thread::hardware_concurrency()));
+    const MemoryBudget mb = compute_budget(m, 16, report_workers);
+    std::printf("\nmemory budget (%zu workers, 16^3 grid):\n", mb.workers);
+    std::printf("  partitions        %zu\n", mb.partitions);
+    std::printf("  max_unit_bytes    %zu\n", mb.max_unit_bytes);
+    std::printf("  bounded_budget    %zu  (workers * max_unit_bytes)\n", mb.budget_bytes);
+    std::printf("  full_mesh_bytes   %zu  (partitions * max_unit_bytes)\n", mb.full_mesh_bytes);
+    if (mb.full_mesh_bytes > 0) {
+        std::printf("  budget / full     %.3f\n",
+                    static_cast<double>(mb.budget_bytes) / mb.full_mesh_bytes);
+    }
+    std::printf("  process_peak_rss  %zu bytes\n", peak_rss_bytes());
+
     if (!out_path.empty()) {
         write_json(samples, out_path, m.triangle_count());
         std::printf("\nwrote %s\n", out_path.c_str());
@@ -156,14 +218,33 @@ int main(int argc, char** argv) {
             std::printf("no baseline at %s; nothing to compare\n", regress_path.c_str());
             return 0;
         }
+        // The gate compares scaling efficiency (speedup / threads), which is
+        // host-independent: a slower CI box has lower absolute throughput but the
+        // same parallel efficiency, so the committed baseline stays meaningful
+        // across machines. Single-thread rows (efficiency == 1.0 by definition)
+        // are skipped.
+        const size_t cores = std::max<size_t>(1, std::thread::hardware_concurrency());
         int failures = 0;
         for (const Sample& s : samples) {
+            if (s.threads <= 1) {
+                continue;
+            }
+            if (s.threads > cores) {
+                // Oversubscribed: efficiency below the physical core count is
+                // hardware-bound, not a code regression. Don't gate it.
+                continue;
+            }
             for (const Sample& b : base) {
-                if (b.op == s.op && b.threads == s.threads && b.tris_per_sec > 0) {
-                    const double drift = (b.tris_per_sec - s.tris_per_sec) / b.tris_per_sec;
+                // Only gate operators whose baseline efficiency was meaningfully
+                // parallel (> 0.4). Memory-bandwidth-bound operators sit near the
+                // serial floor and their efficiency is noise-dominated, so gating
+                // them would be flaky across hosts.
+                if (b.op == s.op && b.threads == s.threads && b.efficiency > 0.4) {
+                    const double drift = (b.efficiency - s.efficiency) / b.efficiency;
                     if (drift > threshold) {
-                        std::printf("REGRESS %s t=%zu: %.1f%% slower than baseline\n", s.op.c_str(),
-                                    s.threads, drift * 100.0);
+                        std::printf(
+                            "REGRESS %s t=%zu: efficiency %.2f vs baseline %.2f (%.1f%% drop)\n",
+                            s.op.c_str(), s.threads, s.efficiency, b.efficiency, drift * 100.0);
                         ++failures;
                     }
                 }

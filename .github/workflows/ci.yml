@@ -102,6 +102,19 @@ jobs:
       - name: Smoke run
         run: ./build/scaling_bench --triangles 50000
 
+  bench-regress:
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@v4
+      - name: Build bench
+        run: |
+          cmake -S . -B build -DCMAKE_BUILD_TYPE=Release -DMESHSLICE_BUILD_TESTS=OFF
+          cmake --build build -j "$(nproc)" --target scaling_bench
+      - name: Regression gate vs committed baseline
+        run: |
+          ./build/scaling_bench --triangles 200000 \
+            --regress bench/results/bench_local.json --threshold 0.30
+
   coverage:
     runs-on: ubuntu-24.04
     steps:
