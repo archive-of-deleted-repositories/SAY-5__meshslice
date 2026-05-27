@@ -19,7 +19,8 @@ void print_usage() {
               << "    --in-flight N      max units in flight (default: threads)\n"
               << "    --divisions N      grid cells per axis (default: 8)\n"
               << "    --voxel-res N      voxel resolution (default: 64)\n"
-              << "    --ratio R          decimate target ratio (default: 0.5)\n";
+              << "    --ratio R          decimate target ratio (default: 0.5)\n"
+              << "    --numa             pin workers to NUMA nodes (default: off)\n";
 }
 
 Mesh load_any(const std::string& path) {
@@ -59,6 +60,8 @@ int main(int argc, char** argv) {
             cfg.voxel_resolution = std::strtoul(next().c_str(), nullptr, 10);
         } else if (a == "--ratio") {
             cfg.decimate_ratio = std::strtof(next().c_str(), nullptr);
+        } else if (a == "--numa") {
+            cfg.numa_aware = true;
         } else {
             std::cerr << "unknown option: " << a << "\n";
             return 2;

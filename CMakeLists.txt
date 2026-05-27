@@ -36,6 +36,7 @@ add_library(meshslice_core
   src/mesh/generators.cpp
   src/partition/grid.cpp
   src/pool/thread_pool.cpp
+  src/pool/numa.cpp
   src/ops/decimate.cpp
   src/ops/normals.cpp
   src/ops/bbox_stats.cpp
@@ -70,6 +71,7 @@ if(MESHSLICE_BUILD_TESTS)
     tests/unit/test_memory_budget.cpp
     tests/unit/test_property.cpp
     tests/unit/test_determinism.cpp
+    tests/unit/test_numa.cpp
     tests/e2e/test_pipeline.cpp
   )
   target_link_libraries(meshslice_tests PRIVATE meshslice_core GTest::gtest_main)

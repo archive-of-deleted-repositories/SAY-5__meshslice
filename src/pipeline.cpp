@@ -3,6 +3,7 @@
 #include <array>
 #include <cstdio>
 #include <map>
+#include <memory>
 #include <sstream>
 #include <thread>
 
@@ -11,6 +12,7 @@
 #include "ops/normals.h"
 #include "ops/voxel_count.h"
 #include "partition/grid.h"
+#include "pool/numa.h"
 #include "pool/thread_pool.h"
 
 namespace meshslice {
@@ -57,14 +59,27 @@ PipelineResult run_pipeline(const Mesh& mesh, const PipelineConfig& cfg) {
         threads = 1;
     }
     const size_t in_flight = cfg.max_in_flight ? cfg.max_in_flight : threads;
-    ThreadPool pool(threads, in_flight);
+
+    // NUMA-aware scheduling only changes thread placement and which worker pulls
+    // which unit; it never changes the canonical merge, so output is identical to
+    // the naive scheduler. On a single-node box the NUMA pool degrades to the
+    // naive pool with zero pinned workers.
+    std::unique_ptr<ThreadPool> pool;
+    if (cfg.numa_aware) {
+        const NumaTopology topo = detect_numa_topology();
+        result.numa_nodes = topo.node_count();
+        pool = std::make_unique<ThreadPool>(threads, in_flight, topo);
+        result.numa_pinned_workers = pool->pinned_workers();
+    } else {
+        pool = std::make_unique<ThreadPool>(threads, in_flight);
+    }
 
     const Aabb global = mesh.bounds();
 
     switch (cfg.op) {
         case Op::BboxStats: {
             std::vector<BboxStats> per(units.size());
-            pool.run(units.size(), [&](size_t i) { per[i] = bbox_stats_unit(mesh, units[i]); });
+            pool->run(units.size(), [&](size_t i) { per[i] = bbox_stats_unit(mesh, units[i]); });
             MergedBbox m = merge_bbox(per);
             result.bbox = m;
             // Hash a canonical byte image of the merged stats.
@@ -84,7 +99,7 @@ PipelineResult run_pipeline(const Mesh& mesh, const PipelineConfig& cfg) {
         }
         case Op::VoxelCount: {
             std::vector<VoxelResult> per(units.size());
-            pool.run(units.size(), [&](size_t i) {
+            pool->run(units.size(), [&](size_t i) {
                 per[i] = voxel_count_unit(mesh, units[i], global, cfg.voxel_resolution);
             });
             const uint64_t n = merge_voxels(per, cfg.voxel_resolution);
@@ -94,7 +109,7 @@ PipelineResult run_pipeline(const Mesh& mesh, const PipelineConfig& cfg) {
         }
         case Op::Normals: {
             std::vector<NormalResult> per(units.size());
-            pool.run(units.size(), [&](size_t i) { per[i] = normals_unit(mesh, units[i]); });
+            pool->run(units.size(), [&](size_t i) { per[i] = normals_unit(mesh, units[i]); });
             std::map<uint32_t, Vec3> merged = merge_normals(per);
             result.normal_vertices = merged.size();
             // Canonical byte image: (vid, nx, ny, nz) in ascending vid order.
@@ -113,8 +128,9 @@ PipelineResult run_pipeline(const Mesh& mesh, const PipelineConfig& cfg) {
         }
         case Op::Decimate: {
             std::vector<DecimateResult> per(units.size());
-            pool.run(units.size(),
-                     [&](size_t i) { per[i] = decimate_unit(mesh, units[i], cfg.decimate_ratio); });
+            pool->run(units.size(), [&](size_t i) {
+                per[i] = decimate_unit(mesh, units[i], cfg.decimate_ratio);
+            });
             std::vector<Triangle> merged = merge_decimate(per);
             result.decimated_triangles = merged.size();
             std::vector<uint8_t> img;
@@ -130,7 +146,7 @@ PipelineResult run_pipeline(const Mesh& mesh, const PipelineConfig& cfg) {
         }
     }
 
-    result.peak_in_flight = pool.peak_in_flight();
+    result.peak_in_flight = pool->peak_in_flight();
     return result;
 }
 
@@ -166,6 +182,8 @@ std::string format_result(const PipelineResult& r) {
     }
     std::snprintf(buf, sizeof(buf), "%016llx", static_cast<unsigned long long>(r.output_hash));
     os << "output_hash=" << buf << "\n";
+    os << "numa_nodes=" << r.numa_nodes << "\n";
+    os << "numa_pinned_workers=" << r.numa_pinned_workers << "\n";
     return os.str();
 }
 

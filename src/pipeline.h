@@ -22,6 +22,7 @@ struct PipelineConfig {
     size_t max_in_flight = 0;  // 0 -> threads.
     uint32_t voxel_resolution = 64;
     float decimate_ratio = 0.5f;
+    bool numa_aware = false;  // pin workers to NUMA nodes and assign partitions.
 };
 
 // The merged result of a pipeline run, plus a stable hash of the canonical-order
@@ -31,6 +32,10 @@ struct PipelineResult {
     uint64_t output_hash = 0;
     size_t partitions = 0;
     size_t peak_in_flight = 0;
+
+    // NUMA scheduling outcome (0 nodes pinned on a single-node / non-Linux host).
+    size_t numa_nodes = 1;
+    size_t numa_pinned_workers = 0;
 
     // Populated per op for human-readable / golden output.
     MergedBbox bbox;

@@ -4,10 +4,13 @@
 #include <atomic>
 #include <condition_variable>
 #include <cstddef>
+#include <cstdint>
 #include <functional>
 #include <mutex>
 #include <thread>
 #include <vector>
+
+#include "pool/numa.h"
 
 namespace meshslice {
 
@@ -22,6 +25,13 @@ namespace meshslice {
 class ThreadPool {
    public:
     ThreadPool(size_t workers, size_t max_in_flight);
+
+    // NUMA-aware constructor. Each worker is pinned round-robin to a NUMA node
+    // from `topo`; with a single-node topology this is a no-op that degrades to
+    // the naive scheduler. `pinned_workers()` reports how many workers actually
+    // got a pin (0 on a single-node or affinity-less host).
+    ThreadPool(size_t workers, size_t max_in_flight, const NumaTopology& topo);
+
     ~ThreadPool();
 
     ThreadPool(const ThreadPool&) = delete;
@@ -45,11 +55,20 @@ class ThreadPool {
         return peak_in_flight_.load();
     }
 
+    // Number of workers that successfully pinned to a NUMA node.
+    size_t pinned_workers() const {
+        return pinned_workers_.load();
+    }
+
    private:
-    void worker_loop();
+    void start(const NumaTopology* topo);
+    void worker_loop(int worker_id, const NumaTopology* topo);
 
     size_t workers_;
     size_t max_in_flight_;
+
+    NumaTopology topo_;
+    std::atomic<size_t> pinned_workers_{0};
 
     std::vector<std::thread> threads_;
 

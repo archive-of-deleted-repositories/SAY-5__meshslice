@@ -7,9 +7,21 @@ namespace meshslice {
 
 ThreadPool::ThreadPool(size_t workers, size_t max_in_flight)
     : workers_(std::max<size_t>(1, workers)), max_in_flight_(std::max<size_t>(1, max_in_flight)) {
+    start(nullptr);
+}
+
+ThreadPool::ThreadPool(size_t workers, size_t max_in_flight, const NumaTopology& topo)
+    : workers_(std::max<size_t>(1, workers)),
+      max_in_flight_(std::max<size_t>(1, max_in_flight)),
+      topo_(topo) {
+    start(&topo_);
+}
+
+void ThreadPool::start(const NumaTopology* topo) {
     threads_.reserve(workers_);
     for (size_t i = 0; i < workers_; ++i) {
-        threads_.emplace_back([this] { worker_loop(); });
+        const int id = static_cast<int>(i);
+        threads_.emplace_back([this, id, topo] { worker_loop(id, topo); });
     }
 }
 
@@ -47,7 +59,17 @@ void ThreadPool::run(size_t n, const std::function<void(size_t)>& task) {
     task_ = nullptr;
 }
 
-void ThreadPool::worker_loop() {
+void ThreadPool::worker_loop(int worker_id, const NumaTopology* topo) {
+    // Pin this worker to a NUMA node round-robin. On a single-node box or a host
+    // without affinity control this returns false and the worker runs unpinned,
+    // identical to the naive scheduler.
+    if (topo != nullptr && !topo->nodes.empty()) {
+        const uint32_t node_id =
+            topo->nodes[static_cast<size_t>(worker_id) % topo->nodes.size()].id;
+        if (pin_thread_to_node(*topo, node_id)) {
+            pinned_workers_.fetch_add(1);
+        }
+    }
     for (;;) {
         std::unique_lock<std::mutex> lk(mtx_);
 
