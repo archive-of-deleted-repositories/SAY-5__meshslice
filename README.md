@@ -16,6 +16,16 @@ Four per-unit operators:
 - `bbox_stats` per-partition AABB, area-weighted centroid, and surface area
 - `voxel_count` count occupied voxels at a chosen grid resolution
 
+Plus two whole-mesh commands:
+
+- `slice` cut the mesh into uniform Z layers and stitch each plane-mesh
+  intersection into print contours, reporting closure, perimeter, and signed
+  area per contour. Layers are processed in parallel: OpenMP when the toolchain
+  has it, the in-tree thread pool otherwise.
+- `validate` structural health report: non-manifold edges, open boundary loops
+  (holes), degenerate triangles, and inverted windings. `--fix-normals`
+  reorients every surface component consistently outward.
+
 ## Design
 
 The work is pure CPU-bound geometry. There is no networking and no I/O on the
@@ -56,6 +66,8 @@ make format-check   # clang-format dry run
 ./build/meshslice decimate examples/bunny_lowpoly.stl --ratio 0.5
 ./build/meshslice bbox_stats examples/sphere.stl --numa     # NUMA-aware
 ./build/meshslice voxel_count big.stl --stream              # out-of-core
+./build/meshslice slice examples/sphere.stl --layer-height 0.1 --format csv
+./build/meshslice validate examples/cube.stl --fix-normals
 ```
 
 ## Layout
