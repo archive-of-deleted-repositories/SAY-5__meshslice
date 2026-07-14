@@ -47,6 +47,7 @@ add_library(meshslice_core
   src/slice/slicer.cpp
   src/slice/validate.cpp
   src/slice/adaptive.cpp
+  src/slice/contour_io.cpp
   src/pipeline.cpp
   src/pipeline_stream.cpp
 )
