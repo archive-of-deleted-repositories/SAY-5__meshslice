@@ -91,6 +91,7 @@ if(MESHSLICE_BUILD_TESTS)
     tests/unit/test_slicer.cpp
     tests/unit/test_validate.cpp
     tests/unit/test_adaptive.cpp
+    tests/unit/test_slice_determinism.cpp
     tests/e2e/test_pipeline.cpp
   )
   target_link_libraries(meshslice_tests PRIVATE meshslice_core GTest::gtest_main)
