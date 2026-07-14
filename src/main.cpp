@@ -8,6 +8,7 @@
 #include "mesh/stl_loader.h"
 #include "pipeline.h"
 #include "pipeline_stream.h"
+#include "slice/slicer.h"
 
 namespace {
 
@@ -15,7 +16,7 @@ using namespace meshslice;
 
 void print_usage() {
     std::cout << "meshslice <op> <file.stl|file.obj> [options]\n"
-              << "  ops: decimate | normals | bbox_stats | voxel_count\n"
+              << "  ops: decimate | normals | bbox_stats | voxel_count | slice\n"
               << "  options:\n"
               << "    --threads N        worker threads (default: hardware)\n"
               << "    --in-flight N      max units in flight (default: threads)\n"
@@ -24,7 +25,10 @@ void print_usage() {
               << "    --ratio R          decimate target ratio (default: 0.5)\n"
               << "    --numa             pin workers to NUMA nodes (default: off)\n"
               << "    --stream           out-of-core streaming mode, STL only\n"
-              << "                       (bbox_stats and voxel_count)\n";
+              << "                       (bbox_stats and voxel_count)\n"
+              << "  slice options:\n"
+              << "    --layer-height H   layer height (default: 1.0)\n"
+              << "    --format F         json | csv (default: json)\n";
 }
 
 Mesh load_any(const std::string& path) {
@@ -34,6 +38,82 @@ Mesh load_any(const std::string& path) {
     return load_binary_stl(path);
 }
 
+std::string fmt_num(double v) {
+    char buf[64];
+    std::snprintf(buf, sizeof(buf), "%.6g", v);
+    return buf;
+}
+
+void print_slice_json(const SliceResult& r, float layer_height) {
+    std::cout << "{\n";
+    std::cout << "  \"layer_height\": " << fmt_num(layer_height) << ",\n";
+    std::cout << "  \"backend\": \"" << r.backend << "\",\n";
+    std::cout << "  \"threads\": " << r.threads_used << ",\n";
+    std::cout << "  \"layers\": [\n";
+    for (size_t i = 0; i < r.layers.size(); ++i) {
+        const Layer& layer = r.layers[i];
+        std::cout << "    {\"z\": " << fmt_num(layer.z) << ", \"contours\": [";
+        for (size_t c = 0; c < layer.contours.size(); ++c) {
+            const Contour& ct = layer.contours[c];
+            std::cout << (c ? ", " : "") << "{\"closed\": " << (ct.closed ? "true" : "false")
+                      << ", \"perimeter\": " << fmt_num(ct.perimeter)
+                      << ", \"signed_area\": " << fmt_num(ct.signed_area)
+                      << ", \"points\": " << ct.points.size() << "}";
+        }
+        std::cout << "]}" << (i + 1 < r.layers.size() ? "," : "") << "\n";
+    }
+    std::cout << "  ]\n}\n";
+}
+
+void print_slice_csv(const SliceResult& r) {
+    std::cout << "layer,z,contour,closed,points,perimeter,signed_area\n";
+    for (size_t i = 0; i < r.layers.size(); ++i) {
+        const Layer& layer = r.layers[i];
+        for (size_t c = 0; c < layer.contours.size(); ++c) {
+            const Contour& ct = layer.contours[c];
+            std::cout << i << "," << fmt_num(layer.z) << "," << c << "," << (ct.closed ? 1 : 0)
+                      << "," << ct.points.size() << "," << fmt_num(ct.perimeter) << ","
+                      << fmt_num(ct.signed_area) << "\n";
+        }
+    }
+}
+
+int run_slice_cli(int argc, char** argv) {
+    const std::string path = argv[2];
+    SliceParams params;
+    std::string format = "json";
+    for (int i = 3; i < argc; ++i) {
+        const std::string a = argv[i];
+        auto next = [&]() -> std::string { return (i + 1 < argc) ? argv[++i] : ""; };
+        if (a == "--layer-height") {
+            params.layer_height = std::strtof(next().c_str(), nullptr);
+        } else if (a == "--threads") {
+            params.threads = std::strtoul(next().c_str(), nullptr, 10);
+        } else if (a == "--format") {
+            format = next();
+        } else {
+            std::cerr << "unknown option: " << a << "\n";
+            return 2;
+        }
+    }
+    if (!(params.layer_height > 0.0f)) {
+        std::cerr << "error: --layer-height must be positive\n";
+        return 2;
+    }
+    if (format != "json" && format != "csv") {
+        std::cerr << "error: --format must be json or csv\n";
+        return 2;
+    }
+    const Mesh mesh = load_any(path);
+    const SliceResult r = slice_mesh(mesh, params);
+    if (format == "csv") {
+        print_slice_csv(r);
+    } else {
+        print_slice_json(r, params.layer_height);
+    }
+    return 0;
+}
+
 }  // namespace
 
 int main(int argc, char** argv) {
@@ -41,6 +121,15 @@ int main(int argc, char** argv) {
     if (argc < 3) {
         print_usage();
         return (argc >= 2 && std::strcmp(argv[1], "--help") == 0) ? 0 : 2;
+    }
+
+    if (std::strcmp(argv[1], "slice") == 0) {
+        try {
+            return run_slice_cli(argc, argv);
+        } catch (const std::exception& e) {
+            std::cerr << "error: " << e.what() << "\n";
+            return 1;
+        }
     }
 
     PipelineConfig cfg;
