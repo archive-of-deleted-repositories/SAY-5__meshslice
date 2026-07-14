@@ -261,7 +261,8 @@ size_t layer_count_for_range(float z_min, float z_max, float layer_height) {
     return static_cast<size_t>(std::max(1.0, n));
 }
 
-SliceResult slice_mesh(const Mesh& mesh, const SliceParams& params) {
+SliceResult slice_at_planes(const Mesh& mesh, const std::vector<float>& planes,
+                            const SliceParams& params) {
     SliceResult result;
     size_t threads = params.threads;
     if (threads == 0) {
@@ -269,24 +270,10 @@ SliceResult slice_mesh(const Mesh& mesh, const SliceParams& params) {
     }
     result.threads_used = threads;
 
-    const Aabb box = mesh.bounds();
-    if (!box.valid()) {
-#ifdef MESHSLICE_HAVE_OPENMP
-        result.backend = "openmp";
-#else
-        result.backend = "thread_pool";
-#endif
-        return result;
-    }
-
-    const size_t n = layer_count_for_range(box.min.z, box.max.z, params.layer_height);
-    const double span = static_cast<double>(box.max.z) - static_cast<double>(box.min.z);
-    const double step =
-        (span > 0.0) ? span / static_cast<double>(n) : static_cast<double>(params.layer_height);
-
+    const size_t n = planes.size();
     result.layers.resize(n);
     for (size_t i = 0; i < n; ++i) {
-        result.layers[i].z = static_cast<float>(box.min.z + (static_cast<double>(i) + 0.5) * step);
+        result.layers[i].z = planes[i];
     }
 
     // Each layer is independent; results land in per-index slots so the output
@@ -304,11 +291,31 @@ SliceResult slice_mesh(const Mesh& mesh, const SliceParams& params) {
     }
 #else
     result.backend = "thread_pool";
-    ThreadPool pool(threads, threads);
-    pool.run(n, do_layer);
+    if (n > 0) {
+        ThreadPool pool(threads, threads);
+        pool.run(n, do_layer);
+    }
 #endif
 
     return result;
+}
+
+SliceResult slice_mesh(const Mesh& mesh, const SliceParams& params) {
+    const Aabb box = mesh.bounds();
+    if (!box.valid()) {
+        return slice_at_planes(mesh, {}, params);
+    }
+
+    const size_t n = layer_count_for_range(box.min.z, box.max.z, params.layer_height);
+    const double span = static_cast<double>(box.max.z) - static_cast<double>(box.min.z);
+    const double step =
+        (span > 0.0) ? span / static_cast<double>(n) : static_cast<double>(params.layer_height);
+
+    std::vector<float> planes(n);
+    for (size_t i = 0; i < n; ++i) {
+        planes[i] = static_cast<float>(box.min.z + (static_cast<double>(i) + 0.5) * step);
+    }
+    return slice_at_planes(mesh, planes, params);
 }
 
 }  // namespace meshslice

@@ -54,6 +54,12 @@ SliceResult slice_mesh(const Mesh& mesh, const SliceParams& params);
 // returned in a deterministic order independent of thread count.
 std::vector<Contour> slice_plane(const Mesh& mesh, float plane_z, const SliceParams& params);
 
+// Slice at an explicit ascending list of plane heights. Both uniform and
+// adaptive slicing funnel through this; layers run in parallel and land in
+// per-index slots, so output is independent of scheduling.
+SliceResult slice_at_planes(const Mesh& mesh, const std::vector<float>& planes,
+                            const SliceParams& params);
+
 // Number of layers slice_mesh will produce for a mesh spanning [z_min, z_max].
 size_t layer_count_for_range(float z_min, float z_max, float layer_height);
 

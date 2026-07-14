@@ -46,6 +46,7 @@ add_library(meshslice_core
   src/merge/merger.cpp
   src/slice/slicer.cpp
   src/slice/validate.cpp
+  src/slice/adaptive.cpp
   src/pipeline.cpp
   src/pipeline_stream.cpp
 )
