@@ -8,6 +8,8 @@
 #include "mesh/stl_loader.h"
 #include "pipeline.h"
 #include "pipeline_stream.h"
+#include "slice/adaptive.h"
+#include "slice/contour_io.h"
 #include "slice/slicer.h"
 #include "slice/validate.h"
 
@@ -31,6 +33,10 @@ void print_usage() {
               << "    --layer-height H   layer height (default: 1.0)\n"
               << "    --format F         json | csv (default: json)\n"
               << "    --fix-normals      reorient windings before slicing\n"
+              << "    --adaptive         thinner layers where the surface is flat\n"
+              << "    --min-layer-height H  adaptive lower bound (default: 0.05)\n"
+              << "    --max-layer-height H  adaptive upper bound (default: 0.5)\n"
+              << "    --export FILE      also write full contours as json\n"
               << "  validate options:\n"
               << "    --fix-normals      reorient windings, then re-validate\n";
 }
@@ -104,8 +110,11 @@ void warn_if_invalid(const ValidationReport& v) {
 int run_slice_cli(int argc, char** argv) {
     const std::string path = argv[2];
     SliceParams params;
+    AdaptiveParams adaptive;
     std::string format = "json";
+    std::string export_path;
     bool do_fix_normals = false;
+    bool use_adaptive = false;
     for (int i = 3; i < argc; ++i) {
         const std::string a = argv[i];
         auto next = [&]() -> std::string { return (i + 1 < argc) ? argv[++i] : ""; };
@@ -117,6 +126,14 @@ int run_slice_cli(int argc, char** argv) {
             format = next();
         } else if (a == "--fix-normals") {
             do_fix_normals = true;
+        } else if (a == "--adaptive") {
+            use_adaptive = true;
+        } else if (a == "--min-layer-height") {
+            adaptive.min_layer_height = std::strtof(next().c_str(), nullptr);
+        } else if (a == "--max-layer-height") {
+            adaptive.max_layer_height = std::strtof(next().c_str(), nullptr);
+        } else if (a == "--export") {
+            export_path = next();
         } else {
             std::cerr << "unknown option: " << a << "\n";
             return 2;
@@ -124,6 +141,11 @@ int run_slice_cli(int argc, char** argv) {
     }
     if (!(params.layer_height > 0.0f)) {
         std::cerr << "error: --layer-height must be positive\n";
+        return 2;
+    }
+    if (use_adaptive && !(adaptive.min_layer_height > 0.0f &&
+                          adaptive.max_layer_height >= adaptive.min_layer_height)) {
+        std::cerr << "error: adaptive bounds must satisfy 0 < min <= max\n";
         return 2;
     }
     if (format != "json" && format != "csv") {
@@ -138,7 +160,12 @@ int run_slice_cli(int argc, char** argv) {
         }
     }
     warn_if_invalid(validate_mesh(mesh));
-    const SliceResult r = slice_mesh(mesh, params);
+    const SliceResult r =
+        use_adaptive ? slice_mesh_adaptive(mesh, params, adaptive) : slice_mesh(mesh, params);
+    if (!export_path.empty()) {
+        write_contours(r, export_path);
+        std::cerr << "exported " << r.layers.size() << " layer(s) to " << export_path << "\n";
+    }
     if (format == "csv") {
         print_slice_csv(r);
     } else {
