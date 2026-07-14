@@ -67,8 +67,29 @@ make format-check   # clang-format dry run
 ./build/meshslice bbox_stats examples/sphere.stl --numa     # NUMA-aware
 ./build/meshslice voxel_count big.stl --stream              # out-of-core
 ./build/meshslice slice examples/sphere.stl --layer-height 0.1 --format csv
+./build/meshslice slice examples/sphere.stl --adaptive --min-layer-height 0.02 \
+    --max-layer-height 0.2 --export contours.json
 ./build/meshslice validate examples/cube.stl --fix-normals
 ```
+
+## Slicing scaling
+
+`slice_bench` slices a dense generated sphere (294,912 triangles, 300 layers)
+at 1/2/4/8 worker threads. Layers are independent, so slicing scales like the
+per-unit operators. Measured on an Apple M-series laptop (thread pool backend,
+best of two passes after warm-up):
+
+| threads | time (s) | speedup | efficiency |
+|---------|----------|---------|------------|
+| 1 | 0.228 | 1.00x | 100% |
+| 2 | 0.127 | 1.80x | 90% |
+| 4 | 0.061 | 3.73x | 93% |
+| 8 | 0.040 | 5.65x | 71% |
+
+The output is byte-identical regardless of thread count: layers land in
+per-index slots, contours stitch in segment-index order, and shared-edge
+crossings interpolate from a canonically ordered edge, so a determinism test
+can compare serialized output across {1, 2, 4, 8} threads byte for byte.
 
 ## Layout
 
@@ -78,11 +99,29 @@ src/partition   spatial grid partitioner and work units
 src/pool        bounded in-flight thread pool
 src/ops         the four operators
 src/merge       canonical-order deterministic merge
+src/slice       layer slicer, adaptive planner, validation, contour io
 src/pipeline    partition -> pool -> ops -> merge
-bench           scaling benchmark + regression gate
+bench           scaling benchmark + regression gate + slice bench
 tests           unit, e2e, libFuzzer
 docs            design notes
 ```
+
+## Releases
+
+- **v1.0.0** parallel mesh pipeline: STL/OBJ loaders, spatial partitioning,
+  bounded-memory thread pool, four operators, deterministic merge, NUMA-aware
+  scheduling, and out-of-core streaming.
+- **v2.0.0** layer slicer: uniform Z layers, plane-mesh intersection, contour
+  stitching with closure/perimeter/signed area, OpenMP with thread pool
+  fallback, and the `slice` CLI subcommand.
+- **v3.0.0** validation: non-manifold edges, boundary loops, degenerate
+  triangles, inverted windings, slice warnings on suspect input, and
+  `--fix-normals` consistent outward reorientation.
+- **v4.0.0** adaptive layers bounded by min/max heights (thin where the
+  surface is flat, thick on walls) and `--export` contour JSON with an exact
+  round-trip loader.
+- **v5.0.0** slicing scaling bench with the speedup table above and
+  byte-identical determinism tests across thread counts.
 
 ## License
 
