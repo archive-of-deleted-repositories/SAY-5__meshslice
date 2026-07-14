@@ -28,6 +28,7 @@ if(MESHSLICE_ENABLE_TSAN)
 endif()
 
 find_package(Threads REQUIRED)
+find_package(OpenMP)
 
 add_library(meshslice_core
   src/mesh/mesh.cpp
@@ -43,11 +44,20 @@ add_library(meshslice_core
   src/ops/bbox_stats.cpp
   src/ops/voxel_count.cpp
   src/merge/merger.cpp
+  src/slice/slicer.cpp
   src/pipeline.cpp
   src/pipeline_stream.cpp
 )
 target_include_directories(meshslice_core PUBLIC ${CMAKE_CURRENT_SOURCE_DIR}/src)
 target_link_libraries(meshslice_core PUBLIC Threads::Threads)
+
+# The layer slicer parallelizes with OpenMP where available and falls back to
+# the in-tree thread pool otherwise (e.g. macOS clang without libomp). The
+# backend in use is reported at runtime.
+if(OpenMP_CXX_FOUND)
+  target_link_libraries(meshslice_core PUBLIC OpenMP::OpenMP_CXX)
+  target_compile_definitions(meshslice_core PUBLIC MESHSLICE_HAVE_OPENMP=1)
+endif()
 
 add_executable(meshslice src/main.cpp)
 target_link_libraries(meshslice PRIVATE meshslice_core)

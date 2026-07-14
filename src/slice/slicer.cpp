@@ -3,8 +3,15 @@
 #include <algorithm>
 #include <cmath>
 #include <cstdint>
+#include <thread>
 #include <unordered_map>
 #include <vector>
+
+#ifdef MESHSLICE_HAVE_OPENMP
+#include <omp.h>
+#else
+#include "pool/thread_pool.h"
+#endif
 
 namespace meshslice {
 
@@ -252,6 +259,56 @@ size_t layer_count_for_range(float z_min, float z_max, float layer_height) {
     const double span = static_cast<double>(z_max) - static_cast<double>(z_min);
     const double n = std::floor(span / static_cast<double>(layer_height) + 0.5);
     return static_cast<size_t>(std::max(1.0, n));
+}
+
+SliceResult slice_mesh(const Mesh& mesh, const SliceParams& params) {
+    SliceResult result;
+    size_t threads = params.threads;
+    if (threads == 0) {
+        threads = std::max(1u, std::thread::hardware_concurrency());
+    }
+    result.threads_used = threads;
+
+    const Aabb box = mesh.bounds();
+    if (!box.valid()) {
+#ifdef MESHSLICE_HAVE_OPENMP
+        result.backend = "openmp";
+#else
+        result.backend = "thread_pool";
+#endif
+        return result;
+    }
+
+    const size_t n = layer_count_for_range(box.min.z, box.max.z, params.layer_height);
+    const double span = static_cast<double>(box.max.z) - static_cast<double>(box.min.z);
+    const double step =
+        (span > 0.0) ? span / static_cast<double>(n) : static_cast<double>(params.layer_height);
+
+    result.layers.resize(n);
+    for (size_t i = 0; i < n; ++i) {
+        result.layers[i].z = static_cast<float>(box.min.z + (static_cast<double>(i) + 0.5) * step);
+    }
+
+    // Each layer is independent; results land in per-index slots so the output
+    // is identical regardless of scheduling.
+    auto do_layer = [&](size_t i) {
+        Layer& layer = result.layers[i];
+        layer.contours = slice_plane(mesh, layer.z, params);
+    };
+
+#ifdef MESHSLICE_HAVE_OPENMP
+    result.backend = "openmp";
+#pragma omp parallel for schedule(dynamic) num_threads(static_cast<int>(threads))
+    for (int64_t i = 0; i < static_cast<int64_t>(n); ++i) {
+        do_layer(static_cast<size_t>(i));
+    }
+#else
+    result.backend = "thread_pool";
+    ThreadPool pool(threads, threads);
+    pool.run(n, do_layer);
+#endif
+
+    return result;
 }
 
 }  // namespace meshslice
