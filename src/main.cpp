@@ -9,6 +9,7 @@
 #include "pipeline.h"
 #include "pipeline_stream.h"
 #include "slice/slicer.h"
+#include "slice/validate.h"
 
 namespace {
 
@@ -16,7 +17,7 @@ using namespace meshslice;
 
 void print_usage() {
     std::cout << "meshslice <op> <file.stl|file.obj> [options]\n"
-              << "  ops: decimate | normals | bbox_stats | voxel_count | slice\n"
+              << "  ops: decimate | normals | bbox_stats | voxel_count | slice | validate\n"
               << "  options:\n"
               << "    --threads N        worker threads (default: hardware)\n"
               << "    --in-flight N      max units in flight (default: threads)\n"
@@ -28,7 +29,10 @@ void print_usage() {
               << "                       (bbox_stats and voxel_count)\n"
               << "  slice options:\n"
               << "    --layer-height H   layer height (default: 1.0)\n"
-              << "    --format F         json | csv (default: json)\n";
+              << "    --format F         json | csv (default: json)\n"
+              << "    --fix-normals      reorient windings before slicing\n"
+              << "  validate options:\n"
+              << "    --fix-normals      reorient windings, then re-validate\n";
 }
 
 Mesh load_any(const std::string& path) {
@@ -78,10 +82,30 @@ void print_slice_csv(const SliceResult& r) {
     }
 }
 
+// Warn (never fail) when a mesh about to be sliced is structurally suspect.
+void warn_if_invalid(const ValidationReport& v) {
+    if (v.boundary_edges > 0) {
+        std::cerr << "warning: mesh has " << v.boundary_loops << " open boundary loop(s) ("
+                  << v.boundary_edges << " boundary edges); contours may not close\n";
+    }
+    if (v.non_manifold_edges > 0) {
+        std::cerr << "warning: mesh has " << v.non_manifold_edges << " non-manifold edge(s)\n";
+    }
+    if (v.degenerate_triangles > 0) {
+        std::cerr << "warning: mesh has " << v.degenerate_triangles << " degenerate triangle(s)\n";
+    }
+    if (v.inverted_normals > 0) {
+        std::cerr << "warning: mesh has " << v.inverted_normals
+                  << " inverted triangle(s); signed areas may be negative"
+                  << " (use --fix-normals)\n";
+    }
+}
+
 int run_slice_cli(int argc, char** argv) {
     const std::string path = argv[2];
     SliceParams params;
     std::string format = "json";
+    bool do_fix_normals = false;
     for (int i = 3; i < argc; ++i) {
         const std::string a = argv[i];
         auto next = [&]() -> std::string { return (i + 1 < argc) ? argv[++i] : ""; };
@@ -91,6 +115,8 @@ int run_slice_cli(int argc, char** argv) {
             params.threads = std::strtoul(next().c_str(), nullptr, 10);
         } else if (a == "--format") {
             format = next();
+        } else if (a == "--fix-normals") {
+            do_fix_normals = true;
         } else {
             std::cerr << "unknown option: " << a << "\n";
             return 2;
@@ -104,7 +130,14 @@ int run_slice_cli(int argc, char** argv) {
         std::cerr << "error: --format must be json or csv\n";
         return 2;
     }
-    const Mesh mesh = load_any(path);
+    Mesh mesh = load_any(path);
+    if (do_fix_normals) {
+        const size_t flipped = fix_normals(mesh);
+        if (flipped > 0) {
+            std::cerr << "fix-normals: reoriented " << flipped << " triangle(s)\n";
+        }
+    }
+    warn_if_invalid(validate_mesh(mesh));
     const SliceResult r = slice_mesh(mesh, params);
     if (format == "csv") {
         print_slice_csv(r);
@@ -112,6 +145,28 @@ int run_slice_cli(int argc, char** argv) {
         print_slice_json(r, params.layer_height);
     }
     return 0;
+}
+
+int run_validate_cli(int argc, char** argv) {
+    const std::string path = argv[2];
+    bool do_fix_normals = false;
+    for (int i = 3; i < argc; ++i) {
+        const std::string a = argv[i];
+        if (a == "--fix-normals") {
+            do_fix_normals = true;
+        } else {
+            std::cerr << "unknown option: " << a << "\n";
+            return 2;
+        }
+    }
+    Mesh mesh = load_any(path);
+    if (do_fix_normals) {
+        const size_t flipped = fix_normals(mesh);
+        std::cout << "fixed_normals=" << flipped << "\n";
+    }
+    const ValidationReport report = validate_mesh(mesh);
+    std::cout << format_report(report);
+    return report.clean() ? 0 : 1;
 }
 
 }  // namespace
@@ -123,9 +178,10 @@ int main(int argc, char** argv) {
         return (argc >= 2 && std::strcmp(argv[1], "--help") == 0) ? 0 : 2;
     }
 
-    if (std::strcmp(argv[1], "slice") == 0) {
+    if (std::strcmp(argv[1], "slice") == 0 || std::strcmp(argv[1], "validate") == 0) {
         try {
-            return run_slice_cli(argc, argv);
+            return std::strcmp(argv[1], "slice") == 0 ? run_slice_cli(argc, argv)
+                                                      : run_validate_cli(argc, argv);
         } catch (const std::exception& e) {
             std::cerr << "error: " << e.what() << "\n";
             return 1;
