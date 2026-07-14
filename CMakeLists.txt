@@ -45,6 +45,7 @@ add_library(meshslice_core
   src/ops/voxel_count.cpp
   src/merge/merger.cpp
   src/slice/slicer.cpp
+  src/slice/validate.cpp
   src/pipeline.cpp
   src/pipeline_stream.cpp
 )
