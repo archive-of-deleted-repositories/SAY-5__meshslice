@@ -87,6 +87,7 @@ if(MESHSLICE_BUILD_TESTS)
     tests/unit/test_numa.cpp
     tests/unit/test_streaming.cpp
     tests/unit/test_slicer.cpp
+    tests/unit/test_validate.cpp
     tests/e2e/test_pipeline.cpp
   )
   target_link_libraries(meshslice_tests PRIVATE meshslice_core GTest::gtest_main)
