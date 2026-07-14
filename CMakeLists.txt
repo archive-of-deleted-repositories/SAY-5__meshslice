@@ -103,6 +103,9 @@ endif()
 if(MESHSLICE_BUILD_BENCH)
   add_executable(scaling_bench bench/scaling_bench.cpp)
   target_link_libraries(scaling_bench PRIVATE meshslice_core)
+
+  add_executable(slice_bench bench/slice_bench.cpp)
+  target_link_libraries(slice_bench PRIVATE meshslice_core)
 endif()
 
 if(MESHSLICE_BUILD_FUZZ)
